@@ -1,0 +1,197 @@
+import sys
+import pandas as pd
+import re
+from elasticsearch import Elasticsearch, helpers
+import mysql.connector
+import logging
+import json
+import elastic_common
+import os
+
+SUPPLIERS_DB_HOST = os.environ.get("SUPPLIERS_DB_HOST")
+SUPPLIERS_DB_USER = os.environ.get("SUPPLIERS_DB_USER")
+SUPPLIERS_DB_PWD = os.environ.get("SUPPLIERS_DB_PWD")
+SUPPLIERS_DB_DATABASE = os.environ.get("SUPPLIERS_DB_DATABASE")
+
+ELASTIC_SEARCH_URL = os.environ.get("ELASTIC_SEARCH_URL")
+
+mysql_config = {
+    "host": SUPPLIERS_DB_HOST,
+    "user": SUPPLIERS_DB_USER,
+    "password": SUPPLIERS_DB_PWD,
+    "database": SUPPLIERS_DB_DATABASE
+}
+
+es = Elasticsearch([ELASTIC_SEARCH_URL])
+
+elastic_common.config_logging()
+
+def extract_supplier_id(filename):
+    match = re.match(r"(\d+)_.*", filename)
+    if not match:
+        raise ValueError("Filename must start with supplier ID")
+    return str(match.group(1))
+
+def load_excel_data(filepath):
+    df = pd.read_excel(filepath, header=0, dtype={
+        "MainAssetThumbnail": str,
+        "MainAssetURL": str
+    })
+    df = df.where(pd.notnull(df), None)
+    return df
+
+
+def fetch_supplier_metadata_from_db(supplier_id):
+    try:
+        conn = mysql.connector.connect(**mysql_config)
+
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT description AS supplier_name, tags, visibility
+            FROM supplier
+            WHERE id = %s
+        """, (supplier_id,))
+        row = cursor.fetchone()
+
+        if not row:
+            raise ValueError(f"Supplier with ID {supplier_id} not found in DB.")
+
+        # Ensure structure matches what Elasticsearch expects
+        return {
+            "supplier_name": row["supplier_name"],
+            "tags": {"es": row["tags"] or ""},
+            "visibility": row["visibility"] or 0
+        }
+
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+        
+def generateId(tenant_id, supplier_id, id):
+    return str(tenant_id) + "-" + str(supplier_id) + "-" + str(id)
+        
+def generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta):
+    ean = str(row['EAN']).strip()
+    if ean == '0':
+        ean = None
+    
+    doc = {
+        "_op_type": "index",
+        "_index": "productscatalog-products",
+        "_id": generateId(tenant_id, supplier_id, str(row['SKU'])),
+        "_source": {
+            "ref": row["SKU"],
+            "ean": ean,
+            "description": {"es": row["Name"]},
+            "short_description": {"es": row["Description"]},
+            "main_picture_url": row["MainAssetURL"] if row["MainAssetURL"] else None,
+            "main_picture_thumb_url": row["MainAssetThumbnail"] if row["MainAssetThumbnail"] else None,
+            "net_price": float(row["PVP"]),
+            "vat_amount": float(row["TAX"]),
+            "discount1": float(row["Discount1"]),
+            "discount2": float(row["Discount2"]),
+            "sale_price": float(row["PVP_FINAL"]),
+            "container_units": int(row["QuantityPerPackage"]) if not pd.isna(row["QuantityPerPackage"]) else None,
+            "container_type": {"es": row["PackagingType"]},
+            "step": int(row["StepQuantity"]) if not pd.isna(row["StepQuantity"]) else None,
+            "deleted": False,
+            "tenant_id": tenant_id,
+            "supplier_id": supplier_id,
+            "supplier_name": supplier_meta["supplier_name"],
+            "tags": supplier_meta["tags"],
+            "visibility": supplier_meta["visibility"]
+        }
+    }
+    
+    if category_info is not None:
+        doc["_source"].update(category_info)
+    
+    return doc
+
+def fetch_existing_product_ids(es, tenant_id, supplier_id):
+    query = {
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": { "tenant_id": tenant_id }},
+                    {"term": { "supplier_id": supplier_id }}
+                ]
+            }
+        },
+        "_source": ["id"]
+    }
+    result = helpers.scan(es, index="productscatalog-products", query=query)
+    return set([doc["_id"] for doc in result])
+
+
+def main():
+    if len(sys.argv) != 3:
+        log.error("Usage: python import_products.py <tenant_id> <excel_file>")
+        sys.exit(1)
+
+    tenant_id = str(sys.argv[1])
+
+    filepath = sys.argv[2]
+    file_name = os.path.basename(filepath)
+    
+    logging.info(f"[PROD][{filepath}]: importing products from excel file")
+
+    supplier_id = extract_supplier_id(file_name)
+    df = load_excel_data(filepath)
+
+    supplier_meta = fetch_supplier_metadata_from_db(supplier_id)
+    
+    existing_ids = fetch_existing_product_ids(es, tenant_id, supplier_id)
+    imported_ids = set()
+
+    # Load all categories once
+    categories = elastic_common.fetch_all_categories(es, tenant_id, supplier_id)
+    
+    categories_map = elastic_common.generate_categories_map(categories)
+
+    actions = []
+    for idx, row in df.iterrows():
+        sku = row["SKU"]
+        if pd.isna(sku):
+            continue
+
+        category_id = str(row["CategoryID"]) if row["CategoryID"] is not None else None
+        
+        if category_id is not None:
+            category_info = elastic_common.find_category_hierarchy(category_id, categories_map)
+            doc = generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta)
+            actions.append(doc)
+            imported_ids.add(doc["_id"])
+
+            # Bulk upload in chunks of 500 for performance
+            if len(actions) >= 500:
+                logging.info("Bulk upload chunk is 500: sending chunk actions to elastic")
+                helpers.bulk(es, actions)
+                actions = []
+        else:
+            logging.error("Product " + str(sku) + " from supplier " + str(supplier_id) + " not imported because missing category ID")
+
+    if actions:
+        logging.info("Sending remaining actions to elastic")
+        helpers.bulk(es, actions)
+
+    # Disable removed products
+    to_disable = existing_ids - imported_ids
+    if to_disable:
+        logging.info("Disabling " + str(len(to_disable)) + " products")
+        
+        disable_actions = [
+            {
+                "_op_type": "update",
+                "_index": "productscatalog-products",
+                "_id": pid,
+                "doc": {"deleted": True}
+            } for pid in to_disable
+        ]
+        helpers.bulk(es, disable_actions)
+
+    logging.info(f"Imported/Updated: {len(imported_ids)}, Disabled: {len(to_disable)}")
+
+
+if __name__ == "__main__":
+    main()

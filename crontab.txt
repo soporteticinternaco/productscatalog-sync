@@ -1,0 +1,4 @@
+*/2 * * * * root	 /bin/sh /scripts/supplierproducts_dump_mysql_to_elastic.sh ELSABIO >> /var/log/cron.log 2>&1
+
+*/2 * * * * root	 /bin/sh /scripts/supplierproducts_dump_excel_to_elastic.sh ELSABIO /data/edp >> /var/log/cron.log 2>&1
+
