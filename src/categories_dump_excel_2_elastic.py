@@ -105,7 +105,7 @@ for cat_id, info in category_map.items():
         "level1": levels['level1'],
         "level2": levels['level2'],
         "level3": levels['level3'],
-        "description": {"es": info['description_es']},
+        "description": {"es": info['description_es'], "pt": info['description_es']},
         "disabled": False
     }
 
@@ -121,6 +121,7 @@ for cat_id, info in category_map.items():
         src = existing["_source"]
         needs_update = (
             src.get("description", {}).get("es") != info['description_es'] or
+            src.get("description", {}).get("pt") != info['description_es'] or
             src.get("level1") != levels['level1'] or
             src.get("level2") != levels['level2'] or
             src.get("level3") != levels['level3'] or
@@ -130,7 +131,7 @@ for cat_id, info in category_map.items():
             bulk_ops.append({
                 "_op_type": "update",
                 "_index": index_name,
-                "_id": cat_id,
+                "_id": _id,
                 "doc": doc
             })
     else:

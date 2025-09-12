@@ -18,7 +18,7 @@ fi
 
 . "$ENV_FILE"
 
-/usr/local/bin/python3 "${BASE_PATH}/src/categories_own_dump_mysql_to_elastic.py" $TENANT "${TENANT_LOWERCASE}own"
+/usr/local/bin/python3 "${BASE_PATH}/src/categories_own_dump_mysql_to_elastic.py" $TENANT "${TENANT_LOWER}own"
 
 /usr/local/bin/python3 "${BASE_PATH}/src/supplierproducts_dump_mysql_to_elastic.py" $TENANT
 

@@ -3,6 +3,7 @@ from elasticsearch import Elasticsearch, helpers
 import argparse
 import elastic_common
 import logging
+import json
 import os
 
 SUPPLIERS_DB_HOST = os.environ.get("SUPPLIERS_DB_HOST")
@@ -37,7 +38,7 @@ def fetch_products():
     cursor = connection.cursor(dictionary=True)
 
     cursor.execute("""
-        SELECT sp.*, s.description AS supplier_name, s.portal, s.visibility, s.tags AS tags
+        SELECT sp.*, s.description AS supplier_name, s.portal, s.visibility, s.tags AS tags, s.margin_percent
         FROM supplier_product sp
         JOIN supplier s ON s.id = sp.supplier_id order by sp.supplier_id asc
     """)
@@ -52,28 +53,31 @@ def generateId(tenant_id, supplier_id, id):
     return str(tenant_id) + "-" + str(supplier_id) + "-" + str(id)
 
 
-def transform_row(row, categories_map):
+def transform_row(row, categories_map, elsabio_categories_map):
     
-    l1Id = row["family_id"]
-    l2Id = row["subfamily_id"]
-    l3Id = row["type_id"]
+    l1 = row["family_id"]
+    l2 = row["subfamily_id"]
+    l3 = row["type_id"]
     
-    category_id = l3Id if l3Id in categories_map \
-        else l2Id if l2Id in categories_map \
-        else l1Id if l1Id in categories_map \
-        else None
-
+    category_id =  l3 if l3 is not None else l2 if l2 is not None else l1
+    
     category = elastic_common.find_category_hierarchy(category_id, categories_map)
+    
+    if category is None:
+        category = elastic_common.find_category_hierarchy(category_id, elsabio_categories_map)
+    
+    net_price = float(row["net_price"])
+    supplier_margin = float(row["margin_percent"]) if row["margin_percent"] is not None else 0
     
     return {
         "_index": index_name,
-        "_id": generateId(tenant_id, row["supplier_id"], row["ref"]),
+        "_id": row["id"],
         "_source": {
-            "id": row["id"],
+            "id": generateId(tenant_id, row["supplier_id"], row["ref"]),
             "ref": row["ref"],
             "ean": row["ean"],
             "sale_price": float(row["sale_price"]) if row["sale_price"] is not None else None,
-            "net_price": float(row["net_price"]) if row["net_price"] is not None else None,
+            "net_price": net_price,
             "vat_amount": float(row["vat_amount"]) if row["vat_amount"] is not None else None,
             "discount1": float(row["discount1"]) if row["discount1"] is not None else None,
             "discount2": float(row["discount2"]) if row["discount2"] is not None else None,
@@ -85,7 +89,7 @@ def transform_row(row, categories_map):
             "supplier_id": str(row['supplier_id']),
             "supplier_name": row["supplier_name"],
             "portal": row["portal"],
-            "visibility": row["visibility"],
+            "supplier_visibility": row["visibility"],
             "deleted": bool(row["deleted"]),
             "step": row["step"],
             "tags": {
@@ -99,16 +103,17 @@ def transform_row(row, categories_map):
             },
             "main_picture_url": row["main_picture_url"],
             "main_picture_thumb_url": row["main_picture_thumb_url"],
+            "net_price_with_margin": ((1 + supplier_margin) * net_price),
             **category
         }
     } if category is not None else None
+
 
 def dump_to_elasticsearch():
     rows = fetch_products()
     current_supplier_id = None
 
-
-    elsabio_categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, tenant_id, 'elsabioown'))
+    elsabio_categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, tenant_id, f'{tenant_id.lower()}own'))
         
     categories_map = {}
     
@@ -119,10 +124,12 @@ def dump_to_elasticsearch():
         if current_supplier_id != supplier_id:
             current_supplier_id = supplier_id
             categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, tenant_id, current_supplier_id))
-            if categories_map is None or len(categories_map.keys()) == 0:
-                categories_map = elsabio_categories_map
+            
+#            logging.error("----> " + json.dumps(categories_map))
+#            if categories_map is None or len(categories_map.keys()) == 0:
+#                categories_map = elsabio_categories_map
         
-        action = transform_row(row, categories_map)
+        action = transform_row(row, categories_map, elsabio_categories_map)
         if action is not None:
             actions.append(action)
         else:
