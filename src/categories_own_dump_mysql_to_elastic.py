@@ -3,6 +3,8 @@ from elasticsearch import Elasticsearch, helpers
 import argparse
 import os
 import elastic_common
+import logging
+import json
 
 EXTRANET_DB_HOST = os.environ.get("EXTRANET_DB_HOST")
 EXTRANET_DB_USER = os.environ.get("EXTRANET_DB_USER")
@@ -28,6 +30,8 @@ args = parser.parse_args()
 tenant_id = args.tenant_id
 supplier_id = args.supplier_id
 
+logging.info("Importing cats for supplier_id: " + str(supplier_id))
+
 es = Elasticsearch([ELASTIC_SEARCH_URL])
 
 ES_INDEX = "productscatalog-categories"
@@ -47,15 +51,16 @@ def fetch_categories():
         aptl.id_product_type AS l2, aptl.description AS l2Description,
         awcl.id_web_category AS l3, awcl.category_name AS l3Description,
         al.iso_639_1 AS lang
-    FROM app_product p
-    JOIN app_web_brand_lang awbl ON awbl.id_web_brand = p.id_web_brand
-    JOIN app_product_type_lang aptl ON aptl.id_product_type = p.id_product_type
-    JOIN app_web_category_lang awcl ON awcl.id_web_category = p.id_web_category
+    FROM app_web_brand_lang awbl join app_web_brand wb ON awbl.id_web_brand = wb.id_web_brand
+    JOIN app_product_type_lang aptl join app_product_type pt ON aptl.id_product_type = pt.id_product_type
+    JOIN app_web_category_lang awcl join app_web_category wc ON awcl.id_web_category = wc.id_web_category
     JOIN app_language al 
       ON awbl.id_language = al.id_language 
      AND aptl.id_language = al.id_language 
      AND awcl.id_language = al.id_language
-    ORDER BY lang, l1, l2, l3;
+    where pt.id_product_type like CONCAT(wb.id_web_brand, '%')
+    and wc.id_web_category like CONCAT(pt.id_product_type , '%')
+    ORDER BY lang, l1, l2, l3
     """
 
     conn = connect_mysql()

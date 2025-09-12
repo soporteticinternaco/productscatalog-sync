@@ -7,6 +7,7 @@ import logging
 import json
 import elastic_common
 import os
+import uuid
 
 SUPPLIERS_DB_HOST = os.environ.get("SUPPLIERS_DB_HOST")
 SUPPLIERS_DB_USER = os.environ.get("SUPPLIERS_DB_USER")
@@ -47,7 +48,7 @@ def fetch_supplier_metadata_from_db(supplier_id):
 
         cursor = conn.cursor(dictionary=True)
         cursor.execute("""
-            SELECT description AS supplier_name, tags, visibility
+            SELECT description AS supplier_name, tags, visibility, margin_percent
             FROM supplier
             WHERE id = %s
         """, (supplier_id,))
@@ -59,8 +60,9 @@ def fetch_supplier_metadata_from_db(supplier_id):
         # Ensure structure matches what Elasticsearch expects
         return {
             "supplier_name": row["supplier_name"],
-            "tags": {"es": row["tags"] or ""},
-            "visibility": row["visibility"] or 0
+            "tags": {"es": row["tags"] or "", "pt": row["tags"] or ""},
+            "visibility": row["visibility"] or 0,
+            "margin_percent": row["margin_percent"]
         }
 
     finally:
@@ -74,32 +76,37 @@ def generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta):
     ean = str(row['EAN']).strip()
     if ean == '0':
         ean = None
+        
+    net_price = float(row["PVP"])
+    supplier_margin = float(supplier_meta["margin_percent"]) if supplier_meta["margin_percent"] is not None else 0
     
     doc = {
         "_op_type": "index",
         "_index": "productscatalog-products",
-        "_id": generateId(tenant_id, supplier_id, str(row['SKU'])),
+        "_id": uuid.uuid4(),
         "_source": {
+            "id": generateId(tenant_id, supplier_id, str(row['SKU'])),
             "ref": row["SKU"],
             "ean": ean,
-            "description": {"es": row["Name"]},
-            "short_description": {"es": row["Description"]},
+            "description": {"es": row["Name"], "pt": row["Name"]},
+            "short_description": {"es": row["Description"], "pt": row["Description"]},
             "main_picture_url": row["MainAssetURL"] if row["MainAssetURL"] else None,
             "main_picture_thumb_url": row["MainAssetThumbnail"] if row["MainAssetThumbnail"] else None,
-            "net_price": float(row["PVP"]),
+            "net_price": net_price,
             "vat_amount": float(row["TAX"]),
             "discount1": float(row["Discount1"]),
             "discount2": float(row["Discount2"]),
             "sale_price": float(row["PVP_FINAL"]),
             "container_units": int(row["QuantityPerPackage"]) if not pd.isna(row["QuantityPerPackage"]) else None,
-            "container_type": {"es": row["PackagingType"]},
+            "container_type": {"es": row["PackagingType"], "pt": row["PackagingType"]},
             "step": int(row["StepQuantity"]) if not pd.isna(row["StepQuantity"]) else None,
             "deleted": False,
             "tenant_id": tenant_id,
             "supplier_id": supplier_id,
             "supplier_name": supplier_meta["supplier_name"],
             "tags": supplier_meta["tags"],
-            "visibility": supplier_meta["visibility"]
+            "supplier_visibility": supplier_meta["visibility"],
+            "net_price_with_margin": ((1 + supplier_margin) * net_price)
         }
     }
     
@@ -145,9 +152,11 @@ def main():
     imported_ids = set()
 
     # Load all categories once
-    categories = elastic_common.fetch_all_categories(es, tenant_id, supplier_id)
-    
-    categories_map = elastic_common.generate_categories_map(categories)
+    elsabio_categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, tenant_id, f'{tenant_id.lower()}own'))
+   
+    categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, tenant_id, supplier_id))
+
+    logging.error(json.dumps(categories_map))
 
     actions = []
     for idx, row in df.iterrows():
@@ -157,19 +166,29 @@ def main():
 
         category_id = str(row["CategoryID"]) if row["CategoryID"] is not None else None
         
-        if category_id is not None:
-            category_info = elastic_common.find_category_hierarchy(category_id, categories_map)
-            doc = generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta)
-            actions.append(doc)
-            imported_ids.add(doc["_id"])
+        if category_id is None:
+            l1 = str(row["FamilyCode"]) if row["FamilyCode"] is not None and row["FamilyCode"] != "-" else ""
+            l2 = str(row["CategoryID"]) if row["SubfamilyCode"] is not None and row["SubfamilyCode"] != "-" else ""
+            l3 = str(row["CategoryID"]) if row["TypeCode"] is not None and row["TypeCode"] != "-" else ""
+            
+            category_id =  l3 if l3 is not None else l2 if l2 is not None else l1
+            
+        logging.error("cat ---> " + (str(category_id) if category_id is not None else "none"))
 
-            # Bulk upload in chunks of 500 for performance
-            if len(actions) >= 500:
-                logging.info("Bulk upload chunk is 500: sending chunk actions to elastic")
-                helpers.bulk(es, actions)
-                actions = []
-        else:
-            logging.error("Product " + str(sku) + " from supplier " + str(supplier_id) + " not imported because missing category ID")
+        category_info = elastic_common.find_category_hierarchy(category_id, categories_map)
+        
+        if category_info is None:
+            category_info = elastic_common.find_category_hierarchy(category_id, elsabio_categories_map)
+           
+        doc = generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta)
+        actions.append(doc)
+        imported_ids.add(doc["_id"])
+
+        # Bulk upload in chunks of 500 for performance
+        if len(actions) >= 500:
+            logging.info("Bulk upload chunk is 500: sending chunk actions to elastic")
+            helpers.bulk(es, actions)
+            actions = []
 
     if actions:
         logging.info("Sending remaining actions to elastic")

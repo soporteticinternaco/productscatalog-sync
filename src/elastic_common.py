@@ -33,12 +33,12 @@ def generate_categories_map(categories):
         level2_value = cat["level2"]
         level3_value = cat["level3"]
 
-        if level1_value and not level2_value and not level3_value:
-            category_lookup[level1_value] = cat
-        elif level1_value and level2_value and not level3_value:
-            category_lookup[level2_value] = cat
-        elif level1_value and level2_value and level3_value:
+        if level3_value:
             category_lookup[level3_value] = cat
+        elif level2_value:
+            category_lookup[level2_value] = cat
+        elif level1_value:
+            category_lookup[level1_value] = cat
 
     return category_lookup
 
@@ -53,9 +53,15 @@ def get_category_level_name(category_id, categories_map):
         
     return description
 
+    
 def find_category_hierarchy(category_id, categories_map):
-    category = categories_map.get(category_id)
-    if not category:
+    
+    category = None
+       
+    if category_id is not None:
+        category = categories_map.get(category_id)
+        
+    if category is None:
         return None  # category not found
 
     return {
@@ -66,7 +72,8 @@ def find_category_hierarchy(category_id, categories_map):
         "level2Name": get_category_level_name(category.get("level2"), categories_map),
         "level3Name": get_category_level_name(category.get("level3"), categories_map),
     }
-    
+
+
 def config_logging():
     logging.basicConfig(
     level=logging.INFO,
