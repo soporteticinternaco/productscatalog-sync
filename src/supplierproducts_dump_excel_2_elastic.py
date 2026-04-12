@@ -35,6 +35,8 @@ def extract_supplier_id(filename):
 
 def load_excel_data(filepath):
     df = pd.read_excel(filepath, header=0, dtype={
+        "SKU": str,
+        "EAN": str,
         "MainAssetThumbnail": str,
         "MainAssetURL": str
     })
@@ -70,7 +72,8 @@ def fetch_supplier_metadata_from_db(supplier_id):
         if conn: conn.close()
         
 def generateId(tenant_id, supplier_id, id):
-    return str(tenant_id) + "-" + str(supplier_id) + "-" + str(id)
+    return str(tenant_id.lower()) + "-" + str(supplier_id) + "-" + str(id)
+
         
 def generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta):
     ean = str(row['EAN']).strip()
@@ -80,12 +83,8 @@ def generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta):
     net_price = float(row["PVP"])
     supplier_margin = float(supplier_meta["margin_percent"]) if supplier_meta["margin_percent"] is not None else 0
     
-    doc = {
-        "_op_type": "index",
-        "_index": "productscatalog-products",
-        "_id": uuid.uuid4(),
-        "_source": {
-            "id": generateId(tenant_id, supplier_id, str(row['SKU'])),
+    # Update doc without including "id" field to respect what has come from mysql database
+    update_doc = {
             "ref": row["SKU"],
             "ean": ean,
             "description": {"es": row["Name"], "pt": row["Name"]},
@@ -108,10 +107,25 @@ def generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta):
             "supplier_visibility": supplier_meta["visibility"],
             "net_price_with_margin": ((1 + supplier_margin) * net_price)
         }
+    
+    id = generateId(tenant_id, supplier_id, str(row['SKU']))
+    
+    # When updating "id" is NOT included
+    # When upserting "id" is included
+    doc = {
+        "_op_type": "update",
+        "_index": "productscatalog-products",
+        "_id": id,
+        "doc": update_doc,
+        "upsert": {
+            "id": id,
+            **update_doc        
+        }
     }
     
     if category_info is not None:
-        doc["_source"].update(category_info)
+        doc["doc"].update(category_info)
+        doc["upsert"].update(category_info)
     
     return doc
 
@@ -179,7 +193,7 @@ def main():
         
         if category_info is None:
             category_info = elastic_common.find_category_hierarchy(category_id, elsabio_categories_map)
-           
+        
         doc = generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta)
         actions.append(doc)
         imported_ids.add(doc["_id"])
