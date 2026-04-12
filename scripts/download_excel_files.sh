@@ -20,6 +20,4 @@ fi
 
 . "$ENV_FILE"
 
-echo "1111 ${EXCEL_FILES_FTP_LOCAL_PATH}"
-
 /usr/local/bin/python3 "${BASE_PATH}/src/download_excel_files.py"

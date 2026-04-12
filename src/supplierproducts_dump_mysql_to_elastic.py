@@ -50,7 +50,7 @@ def fetch_products():
     connection.close()
     
 def generateId(tenant_id, supplier_id, id):
-    return str(tenant_id) + "-" + str(supplier_id) + "-" + str(id)
+    return str(tenant_id).lower() + "-" + str(supplier_id) + "-" + str(id)
 
 
 def transform_row(row, categories_map, elsabio_categories_map):
@@ -71,9 +71,9 @@ def transform_row(row, categories_map, elsabio_categories_map):
     
     return {
         "_index": index_name,
-        "_id": row["id"],
+        "_id": generateId(tenant_id, row["supplier_id"], row["ref"]),
         "_source": {
-            "id": generateId(tenant_id, row["supplier_id"], row["ref"]),
+            "id": row["id"],
             "ref": row["ref"],
             "ean": row["ean"],
             "sale_price": float(row["sale_price"]) if row["sale_price"] is not None else None,
