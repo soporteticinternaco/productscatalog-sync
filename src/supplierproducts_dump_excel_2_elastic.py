@@ -88,7 +88,7 @@ def generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta):
             "ref": row["SKU"],
             "ean": ean,
             "description": {"es": row["Name"], "pt": row["Name"]},
-            "short_description": {"es": row["Description"], "pt": row["Description"]},
+            "short_description": {"es": row["Description"], "pt": row["Description"]} if row["Description"] and not pd.isna(row["Description"]) else None,
             "main_picture_url": row["MainAssetURL"] if row["MainAssetURL"] else None,
             "main_picture_thumb_url": row["MainAssetThumbnail"] if row["MainAssetThumbnail"] else None,
             "net_price": net_price,
@@ -146,13 +146,19 @@ def fetch_existing_product_ids(es, tenant_id, supplier_id):
 
 
 def main():
-    if len(sys.argv) != 3:
-        log.error("Usage: python import_products.py <tenant_id> <excel_file>")
+    # Use 'bulk' param to 0 to disable bulk imports and process one by one so if something fails we know which product failed
+    if len(sys.argv) not in [3, 4]:
+        logging.error("Usage: python import_products.py <tenant_id> <excel_file> [bulk]")
         sys.exit(1)
 
     tenant_id = str(sys.argv[1])
 
     filepath = sys.argv[2]
+    
+    is_bulk = True
+    if len(sys.argv) == 4:
+        is_bulk = sys.argv[3].lower() not in ['false', '0', 'f']
+
     file_name = os.path.basename(filepath)
     
     logging.info(f"[PROD][{filepath}]: importing products from excel file")
@@ -195,16 +201,34 @@ def main():
             category_info = elastic_common.find_category_hierarchy(category_id, elsabio_categories_map)
         
         doc = generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta)
-        actions.append(doc)
-        imported_ids.add(doc["_id"])
+        
+        if is_bulk:
+            actions.append(doc)
+            imported_ids.add(doc["_id"])
 
-        # Bulk upload in chunks of 500 for performance
-        if len(actions) >= 500:
-            logging.info("Bulk upload chunk is 500: sending chunk actions to elastic")
-            helpers.bulk(es, actions)
-            actions = []
+            # Bulk upload in chunks of 500 for performance
+            if len(actions) >= 500:
+                logging.info("Bulk upload chunk is 500: sending chunk actions to elastic")
+                helpers.bulk(es, actions)
+                actions = []
+        else:
+            try:
+                if not bulk:logging.info("Adding: " + json.dumps(doc["doc"], indent=2))
+                es.update(
+                    index=doc["_index"],
+                    id=doc["_id"],
+                    body={
+                        "doc": doc["doc"],
+                        "upsert": doc["upsert"]
+                    }
+                )
+                imported_ids.add(doc["_id"])
+            except Exception as e:
+                logging.error(f"1-by-1 Update failed for product SKU: {sku}. Error: {e}")
+                logging.info("Stopping script after first failure.")
+                sys.exit(1)
 
-    if actions:
+    if actions and is_bulk:
         logging.info("Sending remaining actions to elastic")
         helpers.bulk(es, actions)
 
@@ -213,15 +237,28 @@ def main():
     if to_disable:
         logging.info("Disabling " + str(len(to_disable)) + " products")
         
-        disable_actions = [
-            {
-                "_op_type": "update",
-                "_index": "productscatalog-products",
-                "_id": pid,
-                "doc": {"deleted": True}
-            } for pid in to_disable
-        ]
-        helpers.bulk(es, disable_actions)
+        if is_bulk:
+            disable_actions = [
+                {
+                    "_op_type": "update",
+                    "_index": "productscatalog-products",
+                    "_id": pid,
+                    "doc": {"deleted": True}
+                } for pid in to_disable
+            ]
+            helpers.bulk(es, disable_actions)
+        else:
+            for pid in to_disable:
+                try:
+                    es.update(
+                        index="productscatalog-products",
+                        id=pid,
+                        body={"doc": {"deleted": True}}
+                    )
+                except Exception as e:
+                    logging.error(f"1-by-1 Disable failed for product ID: {pid}. Error: {e}")
+                    logging.info("Stopping script after first failure.")
+                    sys.exit(1)
 
     logging.info(f"Imported/Updated: {len(imported_ids)}, Disabled: {len(to_disable)}")
 
