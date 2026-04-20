@@ -13,9 +13,19 @@ def download_all_files(ftp, remote_path, local_path):
         
         if filename.lower().endswith('.xlsx'):
             local_filepath = os.path.join(local_path, filename)
-            with open(local_filepath, 'wb') as f:
-                print(f"Downloading {filename} to {local_filepath}...")
-                ftp.retrbinary(f"RETR {filename}", f.write)
+            try:
+                with open(local_filepath, 'wb') as f:
+                    print(f"Downloading {filename} to {local_filepath}...")
+                    ftp.retrbinary(f"RETR {filename}", f.write)
+
+                    # Move file on remote server to old2/
+                    new_remote_path = f"old2/{filename}"
+                    print(f"Moving remote file to {new_remote_path}...")
+                    ftp.rename(filename, new_remote_path)
+
+            except Exception as e:
+                print(f"Error processing {filename}: {e}")
+
 
 def main():
     ftp_url = os.getenv('EXCEL_FILES_FTP_URL')
