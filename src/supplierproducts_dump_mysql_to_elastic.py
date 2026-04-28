@@ -17,21 +17,22 @@ parser = argparse.ArgumentParser(description="Dump supplier products from mysql 
 parser.add_argument("tenant_id", help="Needs tenantId")
 args = parser.parse_args()
 
-tenant_id = str(args.tenant_id)
+tenant_id = str(args.tenant_id).lower()
 
 # MySQL connection config
 mysql_config = {
     "host": SUPPLIERS_DB_HOST,
     "user": SUPPLIERS_DB_USER,
     "password": SUPPLIERS_DB_PWD,
-    "database": SUPPLIERS_DB_DATABASE
+    "database": SUPPLIERS_DB_DATABASE,
+    "ssl_disabled": True
 }
 
 # Elasticsearch connection
-index_name = "productscatalog-products"
+index_name = f"productscatalog-{tenant_id}-products"
 es = Elasticsearch([ELASTIC_SEARCH_URL])
 
-elastic_common.config_logging()
+elastic_common.config_logging(f"error_log_{tenant_id}.log")
 
 def fetch_products():
     connection = mysql.connector.connect(**mysql_config)
@@ -61,7 +62,7 @@ def transform_row(row, categories_map, elsabio_categories_map):
     
     category_id =  l3 if l3 is not None else l2 if l2 is not None else l1
     
-    category = elastic_common.find_category_hierarchy(category_id, categories_map)
+    category = elastic_common.find_category_hierarchy(category_id, categories_map, elsabio_categories_map)
     
     if category is None:
         category = elastic_common.find_category_hierarchy(category_id, elsabio_categories_map)
@@ -104,6 +105,14 @@ def transform_row(row, categories_map, elsabio_categories_map):
             "main_picture_url": row["main_picture_url"],
             "main_picture_thumb_url": row["main_picture_thumb_url"],
             "net_price_with_margin": ((1 + supplier_margin) * net_price),
+            "grouping_code": None,
+            "grouping_value": None,
+            "novelty": None,
+            "offer": None,
+            "remarked": None,
+            "segment": None,
+            "promotion_code": None,
+            "type": "edp",
             **category
         }
     } if category is not None else None
@@ -113,7 +122,7 @@ def dump_to_elasticsearch():
     rows = fetch_products()
     current_supplier_id = None
 
-    elsabio_categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, tenant_id, f'{tenant_id.lower()}own'))
+    elsabio_categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, index_name, tenant_id, f'{tenant_id.lower()}-own'))
         
     categories_map = {}
     
@@ -123,12 +132,13 @@ def dump_to_elasticsearch():
     
         if current_supplier_id != supplier_id:
             current_supplier_id = supplier_id
-            categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, tenant_id, current_supplier_id))
+            categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, index_name, tenant_id, current_supplier_id))
             
 #            logging.error("----> " + json.dumps(categories_map))
 #            if categories_map is None or len(categories_map.keys()) == 0:
 #                categories_map = elsabio_categories_map
-        
+        logging.error("--- Importing supplier: " + str(supplier_id) + "   " + json.dumps(categories_map, indent=2))
+
         action = transform_row(row, categories_map, elsabio_categories_map)
         if action is not None:
             actions.append(action)
@@ -144,4 +154,7 @@ def dump_to_elasticsearch():
     logging.info("✅ Data successfully indexed to Elasticsearch.")
 
 if __name__ == "__main__":
-    dump_to_elasticsearch()
+    try:
+        dump_to_elasticsearch()
+    except Exception as e:
+        logging.error(f"Fatal error during dump: {str(e)}", exc_info=True)

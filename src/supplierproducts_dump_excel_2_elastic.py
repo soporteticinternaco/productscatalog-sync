@@ -20,12 +20,12 @@ mysql_config = {
     "host": SUPPLIERS_DB_HOST,
     "user": SUPPLIERS_DB_USER,
     "password": SUPPLIERS_DB_PWD,
-    "database": SUPPLIERS_DB_DATABASE
+    "database": SUPPLIERS_DB_DATABASE,
+    "ssl_disabled": True
 }
 
 es = Elasticsearch([ELASTIC_SEARCH_URL])
 
-elastic_common.config_logging()
 
 def extract_supplier_id(filename):
     match = re.match(r"(\d+)_.*", filename)
@@ -152,6 +152,7 @@ def main():
         sys.exit(1)
 
     tenant_id = str(sys.argv[1])
+    elastic_common.config_logging(f"error_log_{tenant_id}.log")
 
     filepath = sys.argv[2]
     
@@ -264,4 +265,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logging.error(f"Fatal error during dump: {str(e)}", exc_info=True)
