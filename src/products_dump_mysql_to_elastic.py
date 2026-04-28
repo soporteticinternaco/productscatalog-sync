@@ -87,6 +87,30 @@ def fetch_products():
 
     cursor.close()
     connection.close()
+
+
+def fetch_product_prices():
+    connection = mysql.connector.connect(**mysql_config)
+    cursor = connection.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT id_product, id_rate, price FROM app_product_price
+    """)
+
+    prices_by_product = {}
+    for row in cursor:
+        prod_id = row['id_product']
+        if prod_id not in prices_by_product:
+            prices_by_product[prod_id] = []
+        
+        prices_by_product[prod_id].append({
+            "id": row['id_rate'],
+            "price": float(row['price'])
+        })
+
+    cursor.close()
+    connection.close()
+    return prices_by_product
     
 def generateId(tenant_id, supplier_id, id):
     return str(tenant_id).lower() + "-" + str(supplier_id) + "-" + str(id)
@@ -108,7 +132,7 @@ def fetch_existing_product_ids(es, index_name, tenant_id):
     return set([doc["_id"] for doc in result])
 
 
-def transform_row(row, categories_map):
+def transform_row(row, categories_map, prices_by_product):
     
     l1 = row["l1Id"]
     l2 = row["l2Id"]
@@ -138,6 +162,7 @@ def transform_row(row, categories_map):
             "discount2": None,
             "container_units": None,
             "container_type": None,
+            "rates": prices_by_product.get(row["id"], []),
             "tenant_id": tenant_id,
             "supplier_id": supplier_id,
             "supplier_name": row["supplier_name"],
@@ -148,16 +173,16 @@ def transform_row(row, categories_map):
             "tags": {
                 "es": row["tag"] if row["tag"] else None
             },
-            "description": None,
-            "short_description": {
+            "description": {
                 "es": row["title_es"] if row["title_es"] else None,
                 "pt": row["title_pt"] if row["title_pt"] else None,
             },
+            "short_description": None,
             "main_picture_url": None,
             "main_picture_thumb_url": None,
             "net_price_with_margin": None,
-            "grouping_code": row["grouping_code"],
-            "grouping_value": row["grouping_value"],
+            "grouping_code": row["grouping_code"] if row["grouping_code"] else f"single-{str(row['ref'])}",
+            "grouping_value": row["grouping_value"] if row["grouping_value"] else None,
             "novelty": row["novelty"],
             "offer": row["offer"],
             "highlight": row["highlight"],
@@ -174,12 +199,13 @@ def dump_to_elasticsearch():
 
     categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, categories_index_name, tenant_id, f"{tenant_id}-own"))
 
+    prices_by_product = fetch_product_prices()
     existing_ids = fetch_existing_product_ids(es, index_name, tenant_id)
     imported_ids = set()
 
     actions = []
     for row in rows:
-        action = transform_row(row, categories_map)
+        action = transform_row(row, categories_map, prices_by_product)
 
         if action is not None:
             actions.append(action)

@@ -151,7 +151,7 @@ def main():
         logging.error("Usage: python import_products.py <tenant_id> <excel_file> [bulk]")
         sys.exit(1)
 
-    tenant_id = str(sys.argv[1])
+    tenant_id = str(sys.argv[1]).lower()
     elastic_common.config_logging(f"error_log_{tenant_id}.log")
 
     filepath = sys.argv[2]

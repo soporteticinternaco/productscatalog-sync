@@ -64,8 +64,8 @@ def transform_row(row, categories_map, elsabio_categories_map):
     
     category = elastic_common.find_category_hierarchy(category_id, categories_map, elsabio_categories_map)
     
-    if category is None:
-        category = elastic_common.find_category_hierarchy(category_id, elsabio_categories_map)
+    #if category is None:
+    #    category = elastic_common.find_category_hierarchy(category_id, elsabio_categories_map)
     
     net_price = float(row["net_price"])
     supplier_margin = float(row["margin_percent"]) if row["margin_percent"] is not None else 0
@@ -123,10 +123,13 @@ def dump_to_elasticsearch():
     current_supplier_id = None
 
     elsabio_categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, index_name, tenant_id, f'{tenant_id.lower()}-own'))
-        
+
+    logging.error("ELSABIO CATEGORIES MAP: " + json.dumps(elsabio_categories_map['03'], indent=2))
+
+    exit(0)
     categories_map = {}
-    
     actions = []
+
     for row in rows:
         supplier_id = row['supplier_id']
     

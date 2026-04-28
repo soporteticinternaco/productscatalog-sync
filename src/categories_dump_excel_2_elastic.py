@@ -41,7 +41,7 @@ def run_sync():
     parser.add_argument("file_path", help="Path to the Excel file (e.g., /mnt/data/852_categories_21.xlsx)")
     args = parser.parse_args()
 
-    tenant_id = str(args.tenant_id)
+    tenant_id = str(args.tenant_id).lower()
     file_path = args.file_path
     file_name = os.path.basename(file_path)
 

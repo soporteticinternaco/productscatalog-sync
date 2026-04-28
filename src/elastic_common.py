@@ -4,6 +4,7 @@ import logging
 import json
 
 def fetch_all_categories(es, index_name, tenant_id, supplier_id):
+    tenant_id = tenant_id.lower()
     categories = []
 
     docs = helpers.scan(es, index=index_name, 
