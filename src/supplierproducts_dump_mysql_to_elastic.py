@@ -29,7 +29,9 @@ mysql_config = {
 }
 
 # Elasticsearch connection
-index_name = f"productscatalog-{tenant_id}-products"
+products_index_name = f"productscatalog-{tenant_id}-products"
+categories_index_name = f"productscatalog-{tenant_id}-categories"
+
 es = Elasticsearch([ELASTIC_SEARCH_URL])
 
 elastic_common.config_logging(f"error_log_{tenant_id}.log")
@@ -41,7 +43,8 @@ def fetch_products():
     cursor.execute("""
         SELECT sp.*, s.description AS supplier_name, s.portal, s.visibility, s.tags AS tags, s.margin_percent
         FROM supplier_product sp
-        JOIN supplier s ON s.id = sp.supplier_id order by sp.supplier_id asc
+        JOIN supplier s ON s.id = sp.supplier_id 
+        order by sp.supplier_id asc
     """)
 
     for row in cursor:
@@ -71,7 +74,7 @@ def transform_row(row, categories_map, elsabio_categories_map):
     supplier_margin = float(row["margin_percent"]) if row["margin_percent"] is not None else 0
     
     return {
-        "_index": index_name,
+        "_index": products_index_name,
         "_id": generateId(tenant_id, row["supplier_id"], row["ref"]),
         "_source": {
             "id": row["id"],
@@ -122,11 +125,8 @@ def dump_to_elasticsearch():
     rows = fetch_products()
     current_supplier_id = None
 
-    elsabio_categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, index_name, tenant_id, f'{tenant_id.lower()}-own'))
+    elsabio_categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, categories_index_name, tenant_id, f'{tenant_id}-own'))
 
-    logging.error("ELSABIO CATEGORIES MAP: " + json.dumps(elsabio_categories_map['03'], indent=2))
-
-    exit(0)
     categories_map = {}
     actions = []
 
@@ -135,12 +135,11 @@ def dump_to_elasticsearch():
     
         if current_supplier_id != supplier_id:
             current_supplier_id = supplier_id
-            categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, index_name, tenant_id, current_supplier_id))
+            logging.error("--- Importing supplier: " + str(current_supplier_id))
+            categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, categories_index_name, tenant_id, current_supplier_id))
             
-#            logging.error("----> " + json.dumps(categories_map))
-#            if categories_map is None or len(categories_map.keys()) == 0:
-#                categories_map = elsabio_categories_map
-        logging.error("--- Importing supplier: " + str(supplier_id) + "   " + json.dumps(categories_map, indent=2))
+            if categories_map is None or len(categories_map.keys()) == 0:
+                categories_map = elsabio_categories_map
 
         action = transform_row(row, categories_map, elsabio_categories_map)
         if action is not None:

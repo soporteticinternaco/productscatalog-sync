@@ -3,21 +3,22 @@ import logger
 import logging
 import json
 
-def fetch_all_categories(es, index_name, tenant_id, supplier_id):
+def fetch_all_categories(es, index_name, tenant_id, supplier_id):    
     tenant_id = tenant_id.lower()
     categories = []
 
-    docs = helpers.scan(es, index=index_name, 
-                            query={
-                                "query": {
-                                    "bool": {
-                                        "must": [
-                                            {"term": { "tenant_id.keyword": tenant_id }},
-                                            {"term": { "supplier_id.keyword": supplier_id }}
-                                        ]
-                                    }
-                                }
-                            })
+    query={
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": { "tenant_id.keyword": tenant_id }},
+                    {"term": { "supplier_id.keyword": supplier_id }}
+                ]
+            }
+        }
+    }
+
+    docs = helpers.scan(es, index=index_name, query=query)
 
     for doc in docs:
         categories.append({

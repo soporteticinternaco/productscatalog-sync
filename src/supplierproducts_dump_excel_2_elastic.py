@@ -114,7 +114,7 @@ def generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta):
     # When upserting "id" is included
     doc = {
         "_op_type": "update",
-        "_index": "productscatalog-products",
+        "_index": f"productscatalog-{tenant_id}-products",
         "_id": id,
         "doc": update_doc,
         "upsert": {
@@ -141,7 +141,7 @@ def fetch_existing_product_ids(es, tenant_id, supplier_id):
         },
         "_source": ["id"]
     }
-    result = helpers.scan(es, index="productscatalog-products", query=query)
+    result = helpers.scan(es, index=f"productscatalog-{tenant_id}-products", query=query)
     return set([doc["_id"] for doc in result])
 
 
@@ -173,11 +173,9 @@ def main():
     imported_ids = set()
 
     # Load all categories once
-    elsabio_categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, tenant_id, f'{tenant_id.lower()}own'))
+    elsabio_categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, f"productscatalog-{tenant_id}-categories", tenant_id, f'{tenant_id.lower()}own'))
    
-    categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, tenant_id, supplier_id))
-
-    logging.error(json.dumps(categories_map))
+    categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es,f"productscatalog-{tenant_id}-categories", tenant_id, supplier_id))
 
     actions = []
     for idx, row in df.iterrows():
@@ -194,8 +192,6 @@ def main():
             
             category_id =  l3 if l3 is not None else l2 if l2 is not None else l1
             
-        logging.error("cat ---> " + (str(category_id) if category_id is not None else "none"))
-
         category_info = elastic_common.find_category_hierarchy(category_id, categories_map)
         
         if category_info is None:
@@ -242,7 +238,7 @@ def main():
             disable_actions = [
                 {
                     "_op_type": "update",
-                    "_index": "productscatalog-products",
+                    "_index": f"productscatalog-{tenant_id}-products",
                     "_id": pid,
                     "doc": {"deleted": True}
                 } for pid in to_disable
@@ -252,7 +248,7 @@ def main():
             for pid in to_disable:
                 try:
                     es.update(
-                        index="productscatalog-products",
+                        index=f"productscatalog-{tenant_id}-products",
                         id=pid,
                         body={"doc": {"deleted": True}}
                     )
@@ -269,3 +265,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         logging.error(f"Fatal error during dump: {str(e)}", exc_info=True)
+        exit(1)

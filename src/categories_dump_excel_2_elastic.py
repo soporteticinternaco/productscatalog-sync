@@ -56,10 +56,10 @@ def run_sync():
     supplier_id = str(match.group(1))
 
     # Load Excel
-    df = pd.read_excel(file_path, header=0)
+    df = pd.read_excel(file_path, header=0, keep_default_na=False, na_values=[""])
     df.columns = ['category_id', 'parent_id', 'description_es']
 
-    index_name = "productscatalog-categories"
+    index_name = f"productscatalog-{tenant_id}-categories"
     
     # Elasticsearch connection
     es = Elasticsearch([ELASTIC_SEARCH_URL])
@@ -89,7 +89,7 @@ def run_sync():
     # Build category map from Excel
     category_map = {
         str(row['category_id']): {
-            'description_es': row['description_es'],
+            'description_es': str(row['description_es']) if pd.notna(row['description_es']) else None,
             'parent_id': str(row['parent_id']) if pd.notna(row['parent_id']) else None
         }
         for _, row in df.iterrows()
@@ -162,3 +162,4 @@ if __name__ == "__main__":
         run_sync()
     except Exception as e:
         logging.error(f"Fatal error during dump: {str(e)}", exc_info=True)
+        exit(1)
