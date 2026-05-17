@@ -17,32 +17,29 @@ mysql_config = {
     "host": EXTRANET_DB_HOST,
     "user": EXTRANET_DB_USER,
     "password": EXTRANET_DB_PWD,
-    "database": EXTRANET_DB_DATABASE
+    "database": EXTRANET_DB_DATABASE,
+    "ssl_disabled": True
 }
 
-elastic_common.config_logging()
 
-parser = argparse.ArgumentParser(description="Dump categories Excel file to Elasticsearch")
+parser = argparse.ArgumentParser(description="Dump own categories to Elasticsearch")
 parser.add_argument("tenant_id", help="Needs tenantId")
 parser.add_argument("supplier_id", help="Needs supplierId")
 args = parser.parse_args()
 
-tenant_id = args.tenant_id
+tenant_id = args.tenant_id.lower()
 supplier_id = args.supplier_id
+
+elastic_common.config_logging(f"error_log_{tenant_id}.log")
 
 logging.info("Importing cats for supplier_id: " + str(supplier_id))
 
-es = Elasticsearch([ELASTIC_SEARCH_URL])
+elastic = Elasticsearch([ELASTIC_SEARCH_URL])
 
-ES_INDEX = "productscatalog-categories"
+ES_INDEX = f"productscatalog-{tenant_id}-categories"
 
 def connect_mysql():
-    return mysql.connector.connect(
-        host=mysql_config["host"],
-        user=mysql_config["user"],
-        password=mysql_config["password"],
-        database=mysql_config["database"]
-    )
+    return mysql.connector.connect(**mysql_config)
 
 def fetch_categories():
     query = """
@@ -136,7 +133,7 @@ def fetch_existing_ids():
             }
         }
     }
-    return {doc["_id"] for doc in helpers.scan(es, index=ES_INDEX, query=query)}
+    return {doc["_id"] for doc in helpers.scan(elastic, index=ES_INDEX, query=query)}
 
 def generateId(tenant_id, supplier_id, id):
     return str(tenant_id + "-" + supplier_id + "-" + id)
@@ -169,7 +166,7 @@ def upsert_and_disable(docs, existing_ids):
     print("Upserting " + str(len(new_ids)) + " documents")
     print("Disabling " + str(len(to_disable)) + " documents")
 
-    helpers.bulk(es, actions)
+    helpers.bulk(elastic, actions)
 
 def main():
     print("Fetching data from MySQL...")
@@ -187,4 +184,7 @@ def main():
     print("Done.")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logging.error(f"Fatal error during dump: {str(e)}", exc_info=True)
