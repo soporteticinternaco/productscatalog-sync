@@ -82,7 +82,7 @@ def update_index(index_name):
     
     # 4. Update mapping (add subfields)
     print("Updating mapping (subfields)...")
-    if index_name == "productscatalog-elsabio-products":
+    if index_name == "productscatalog-elsabio-products-current":
         mapping_body = {
             "properties": {
                 "supplier_name": {
@@ -147,10 +147,10 @@ def update_index(index_name):
 if __name__ == "__main__":
     indices = [
         "productscatalog-elsabio-products",
-        "productscatalog-internaco-products",
-        "productscatalog-sa92-products",
-        "productscatalog-maxrain-products",
-        "productscatalog-ipmax-products"
+        "productscatalog-internaco-products-current",
+        "productscatalog-sa92-products-current",
+        "productscatalog-maxrain-products-current",
+        "productscatalog-ipmax-products-current"
     ]
     
     for idx in indices:

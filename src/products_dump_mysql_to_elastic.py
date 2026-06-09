@@ -6,6 +6,7 @@ import logger
 import logging
 import json
 import os
+from productsservice_client import ProductsServiceClient
 
 EXTRANET_DB_HOST = os.environ.get("EXTRANET_DB_HOST")
 EXTRANET_DB_USER = os.environ.get("EXTRANET_DB_USER")
@@ -48,7 +49,7 @@ mysql_config = {
 }
 
 # Elasticsearch connection
-index_name = f"productscatalog-{tenant_id}-products"
+index_name = f"productscatalog-{tenant_id}-products-current"
 categories_index_name = f"productscatalog-{tenant_id}-categories"
 es = Elasticsearch([ELASTIC_SEARCH_URL])
 
@@ -132,8 +133,8 @@ def fetch_existing_product_ids(es, index_name, tenant_id):
     return set([doc["_id"] for doc in result])
 
 
-def transform_row(row, categories_map, prices_by_product):
-    
+def transform_row(row, categories_map, prices_by_product, pictures_map):
+
     l1 = row["l1Id"]
     l2 = row["l2Id"]
     l3 = row["l3Id"]
@@ -147,6 +148,8 @@ def transform_row(row, categories_map, prices_by_product):
         return None
 
     supplier_id = str(row['supplier_id']) if row['supplier_id'] is not None else None
+
+    pictures = pictures_map.get(str(row["ref"]), {})
 
     return {
         "_index": index_name,
@@ -178,8 +181,8 @@ def transform_row(row, categories_map, prices_by_product):
                 "pt": row["title_pt"] if row["title_pt"] else None,
             },
             "short_description": None,
-            "main_picture_url": None,
-            "main_picture_thumb_url": None,
+            "main_picture_url": pictures.get("main_picture_url"),
+            "main_picture_thumb_url": pictures.get("main_picture_thumb_url"),
             "net_price_with_margin": None,
             "grouping_code": row["grouping_code"] if row["grouping_code"] else f"single-{str(row['ref'])}",
             "grouping_value": row["grouping_value"] if row["grouping_value"] else None,
@@ -195,17 +198,29 @@ def transform_row(row, categories_map, prices_by_product):
 
 
 def dump_to_elasticsearch():
-    rows = fetch_products()
+    logging.info(f"Starting products dump for tenant '{tenant_id}'")
 
+    logging.info("Fetching products from MySQL")
+    rows = list(fetch_products())
+    logging.info(f"Fetched {len(rows)} products from MySQL")
+
+    logging.info("Fetching categories from Elasticsearch")
     categories_map = elastic_common.generate_categories_map(elastic_common.fetch_all_categories(es, categories_index_name, tenant_id, f"{tenant_id}-own"))
 
+    logging.info("Fetching product prices from MySQL")
     prices_by_product = fetch_product_prices()
+
+    products_client = ProductsServiceClient(company_id=tenant_id)
+    pictures_map = products_client.fetch_main_pictures(row["ref"] for row in rows)
+
+    logging.info("Fetching existing product ids from Elasticsearch")
     existing_ids = fetch_existing_product_ids(es, index_name, tenant_id)
     imported_ids = set()
 
+    logging.info(f"Transforming {len(rows)} products for indexing")
     actions = []
     for row in rows:
-        action = transform_row(row, categories_map, prices_by_product)
+        action = transform_row(row, categories_map, prices_by_product, pictures_map)
 
         if action is not None:
             actions.append(action)
@@ -219,6 +234,7 @@ def dump_to_elasticsearch():
             logging.error("Product '" + row["ref"] + "' cannot be added because could not find category '" + category_id + "'")
 
 
+    logging.info(f"Indexing {len(actions)} products to Elasticsearch index '{index_name}'")
     helpers.bulk(es, actions)
 
     # Disable removed products

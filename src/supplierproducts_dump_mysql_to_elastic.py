@@ -29,7 +29,7 @@ mysql_config = {
 }
 
 # Elasticsearch connection
-products_index_name = f"productscatalog-{tenant_id}-products"
+products_index_name = f"productscatalog-{tenant_id}-products-current"
 categories_index_name = f"productscatalog-{tenant_id}-categories"
 
 es = Elasticsearch([ELASTIC_SEARCH_URL])

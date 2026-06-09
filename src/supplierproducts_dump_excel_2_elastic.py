@@ -114,7 +114,7 @@ def generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta):
     # When upserting "id" is included
     doc = {
         "_op_type": "update",
-        "_index": f"productscatalog-{tenant_id}-products",
+        "_index": f"productscatalog-{tenant_id}-products-current",
         "_id": id,
         "doc": update_doc,
         "upsert": {
@@ -141,7 +141,7 @@ def fetch_existing_product_ids(es, tenant_id, supplier_id):
         },
         "_source": ["id"]
     }
-    result = helpers.scan(es, index=f"productscatalog-{tenant_id}-products", query=query)
+    result = helpers.scan(es, index=f"productscatalog-{tenant_id}-products-current", query=query)
     return set([doc["_id"] for doc in result])
 
 
@@ -238,7 +238,7 @@ def main():
             disable_actions = [
                 {
                     "_op_type": "update",
-                    "_index": f"productscatalog-{tenant_id}-products",
+                    "_index": f"productscatalog-{tenant_id}-products-current",
                     "_id": pid,
                     "doc": {"deleted": True}
                 } for pid in to_disable
