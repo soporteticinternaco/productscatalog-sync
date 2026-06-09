@@ -18,7 +18,11 @@ fi
 
 . "$ENV_FILE"
 
+echo "    Import supplier categories from mysql for tenant $TENANT"
+
 python3 "${BASE_PATH}/src/categories_own_dump_mysql_to_elastic.py" $TENANT "${TENANT_LOWER}-own"
+
+echo "    Import supplier products from mysql for tenant $TENANT"
 
 python3 "${BASE_PATH}/src/supplierproducts_dump_mysql_to_elastic.py" $TENANT
 

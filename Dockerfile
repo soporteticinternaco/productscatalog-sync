@@ -7,16 +7,17 @@ COPY requirements.txt /scripts
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 ENV TZ=Europe/Madrid
+ENV PYTHONUNBUFFERED=1
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# Copy your crontab file into the container
-#COPY crontab.txt /etc/cron.d/mycron
-#RUN chmod 0644 /etc/cron.d/mycron
-
-# Apply cron file and create a log file
-#RUN crontab /etc/cron.d/mycron
+# crontab.txt is volume-mounted to /etc/cron.d/mycron via docker-compose
+# chmod is applied at runtime by entrypoint.sh
 RUN touch /var/log/cron.log
 
 # Keep container alive and show cron logs
-CMD cron && tail -f /var/log/cron.log
+#CMD cron && tail -f /var/log/cron.log
 
+COPY entrypoint.sh /
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]

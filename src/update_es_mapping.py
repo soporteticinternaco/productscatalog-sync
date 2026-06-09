@@ -4,7 +4,7 @@ from elasticsearch import Elasticsearch
 import os
 
 # Configuration (fallback to env vars if not provided)
-ELASTIC_SEARCH_URL = os.environ.get("ELASTIC_SEARCH_URL", "http://elastic-import:123456@192.168.4.114:9200")
+ELASTIC_SEARCH_URL = os.environ.get("ELASTIC_SEARCH_URL", "http://elastic:KKK-ic99@192.168.17.80:9200")
 
 def update_index(index_name):
     es = Elasticsearch([ELASTIC_SEARCH_URL])
@@ -42,7 +42,7 @@ def update_index(index_name):
                 },
                 "phonetic_analyzer": {
                     "tokenizer": "standard",
-                    "filter": ["lowercase", "double_metaphone_filter"]
+                    "filter": ["lowercase", "iberian_phonetic_filter"]
                 },
                 "first_word_analyzer": {
                     "tokenizer": "standard",
@@ -61,9 +61,10 @@ def update_index(index_name):
                     "pattern": "[^a-z0-9]",
                     "replacement": ""
                 },
-                "double_metaphone_filter": {
+                "iberian_phonetic_filter": {
                     "type": "phonetic",
-                    "encoder": "double_metaphone",
+                    "encoder": "beider_morse",
+                    "languageset": ["spanish", "portuguese"],
                     "replace": False
                 },
                 "first_word_limit": {
@@ -81,44 +82,64 @@ def update_index(index_name):
     
     # 4. Update mapping (add subfields)
     print("Updating mapping (subfields)...")
-    mapping_body = {
-        "properties": {
-            "supplier_name": {
-                "type": "text",
-                "fields": {
-                    "keyword": {"type": "keyword", "ignore_above": 256},
-                    "normalized": {"type": "text", "analyzer": "alphanumeric"},
-                    "phonetic": {"type": "text", "analyzer": "phonetic_analyzer"}
-                }
-            },
-            "description": {
-                "properties": {
-                    "es": {
-                        "type": "text",
-                        "fields": {
-                            "keyword": {"type": "keyword", "ignore_above": 256},
-                            "normalized": {"type": "text", "analyzer": "alphanumeric"},
-                            "phonetic": {"type": "text", "analyzer": "phonetic_analyzer"},
-                            "stemmed": {"type": "text", "analyzer": "spanish"},
-                            "first_word": {"type": "text", "analyzer": "first_word_analyzer"},
-                            "iberian": {"type": "text", "analyzer": "iberian_standard"}
-                        }
-                    },
-                    "pt": {
-                        "type": "text",
-                        "fields": {
-                            "keyword": {"type": "keyword", "ignore_above": 256},
-                            "normalized": {"type": "text", "analyzer": "alphanumeric"},
-                            "phonetic": {"type": "text", "analyzer": "phonetic_analyzer"},
-                            "stemmed": {"type": "text", "analyzer": "portuguese"},
-                            "first_word": {"type": "text", "analyzer": "first_word_analyzer"},
-                            "iberian": {"type": "text", "analyzer": "iberian_standard"}
+    if index_name == "productscatalog-elsabio-products":
+        mapping_body = {
+            "properties": {
+                "supplier_name": {
+                    "type": "text",
+                    "fields": {
+                        "phonetic": {"type": "text", "analyzer": "phonetic_analyzer"}
+                    }
+                },
+                "description": {
+                    "properties": {
+                        "es": {
+                            "type": "text",
+                            "analyzer": "iberian_standard",
+                            "search_analyzer": "my_search_analyzer_es",
+                            "fields": {
+                                "phonetic": {"type": "text", "analyzer": "phonetic_analyzer"}
+                            }
+                        },
+                        "pt": {
+                            "type": "text",
+                            "analyzer": "iberian_standard",
+                            "search_analyzer": "my_search_analyzer_pt",
+                            "fields": {
+                                "phonetic": {"type": "text", "analyzer": "phonetic_analyzer"}
+                            }
                         }
                     }
                 }
             }
         }
-    }
+    else:
+        mapping_body = {
+            "properties": {
+                "supplier_name": {
+                    "type": "text",
+                    "fields": {
+                        "phonetic": {"type": "text", "analyzer": "phonetic_analyzer"}
+                    }
+                },
+                "description": {
+                    "properties": {
+                        "es": {
+                            "type": "text",
+                            "fields": {
+                                "phonetic": {"type": "text", "analyzer": "phonetic_analyzer"}
+                            }
+                        },
+                        "pt": {
+                            "type": "text",
+                            "fields": {
+                                "phonetic": {"type": "text", "analyzer": "phonetic_analyzer"}
+                            }
+                        }
+                    }
+                }
+            }
+        }
     es.indices.put_mapping(index=index_name, body=mapping_body)
     
     print(f"✅ Index {index_name} updated successfully.")
