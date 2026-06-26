@@ -47,8 +47,9 @@ done
 
 echo "$(date '+%Y-%m-%d %H:%M:%S')     Import supplier products excel files import for tenant $TENANT"
 
-# Process *products*.xlsx files
-for file in "$PENDING_PATH/"*products*.xlsx; do
+# Process all *.xlsx files except those whose name contains "categories"
+for file in "$PENDING_PATH/"*.xlsx; do
+  case "$(basename "$file")" in *categories*) continue ;; esac
   if [ -f "$file" ]; then
     /usr/local/bin/python3 "$BASE_PATH"/src/supplierproducts_dump_excel_2_elastic.py ELSABIO "$file"
     if [ $? -eq 0 ]; then

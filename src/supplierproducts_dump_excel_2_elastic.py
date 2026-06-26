@@ -26,6 +26,26 @@ mysql_config = {
 
 es = Elasticsearch([ELASTIC_SEARCH_URL])
 
+# When DEBUG=1 a detailed trace is written to debug.log: when processing of an
+# excel file starts/finishes, the operation resolved for each product ref
+# (insert/update/delete) and any per-product error together with its ref.
+DEBUG = os.environ.get("DEBUG") == "1"
+debug_logger = logging.getLogger("debug")
+debug_logger.propagate = False
+if DEBUG:
+    debug_logger.setLevel(logging.DEBUG)
+    if not debug_logger.handlers:
+        _debug_handler = logging.FileHandler("debug.log", mode="w")
+        _debug_handler.setLevel(logging.DEBUG)
+        _debug_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+        debug_logger.addHandler(_debug_handler)
+
+
+def log_debug(msg):
+    if DEBUG:
+        debug_logger.debug(msg)
+
 
 def extract_supplier_id(filename):
     match = re.match(r"(\d+)_.*", filename)
@@ -38,7 +58,16 @@ def load_excel_data(filepath):
         "SKU": str,
         "EAN": str,
         "MainAssetThumbnail": str,
-        "MainAssetURL": str
+        "MainAssetURL": str,
+        # Read category code columns as strings so that values formatted as
+        # numbers in the Excel file (e.g. 5) are not turned into "5.0", and so
+        # that empty cells become None instead of a float NaN (a NaN would
+        # survive the df.where(...) below because numeric columns cannot hold
+        # None, and str(NaN) yields the literal "nan").
+        "CategoryID": str,
+        "FamilyCode": str,
+        "SubfamilyCode": str,
+        "TypeCode": str
     })
     df = df.where(pd.notnull(df), None)
     return df
@@ -87,6 +116,7 @@ def generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta):
     update_doc = {
             "ref": row["SKU"],
             "ean": ean,
+            "type": "edp",
             "description": {"es": row["Name"], "pt": row["Name"]},
             "short_description": {"es": row["Description"], "pt": row["Description"]} if row["Description"] and not pd.isna(row["Description"]) else None,
             "main_picture_url": row["MainAssetURL"] if row["MainAssetURL"] else None,
@@ -163,6 +193,7 @@ def main():
     file_name = os.path.basename(filepath)
     
     logging.info(f"[PROD][{filepath}]: importing products from excel file")
+    log_debug(f"START processing excel file: {file_name}")
 
     supplier_id = extract_supplier_id(file_name)
     df = load_excel_data(filepath)
@@ -183,33 +214,31 @@ def main():
         if pd.isna(sku):
             continue
 
-        category_id = str(row["CategoryID"]) if row["CategoryID"] is not None else None
-        
-        if category_id is None:
-            l1 = str(row["FamilyCode"]) if row["FamilyCode"] is not None and row["FamilyCode"] != "-" else ""
-            l2 = str(row["CategoryID"]) if row["SubfamilyCode"] is not None and row["SubfamilyCode"] != "-" else ""
-            l3 = str(row["CategoryID"]) if row["TypeCode"] is not None and row["TypeCode"] != "-" else ""
-            
-            category_id =  l3 if l3 is not None else l2 if l2 is not None else l1
-            
-        category_info = elastic_common.find_category_hierarchy(category_id, categories_map)
-        
-        if category_info is None:
-            category_info = elastic_common.find_category_hierarchy(category_id, elsabio_categories_map)
-        
-        doc = generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta)
-        
-        if is_bulk:
-            actions.append(doc)
-            imported_ids.add(doc["_id"])
+        try:
+            category_id = str(row["CategoryID"]) if row["CategoryID"] is not None else None
 
-            # Bulk upload in chunks of 500 for performance
-            if len(actions) >= 500:
-                logging.info("Bulk upload chunk is 500: sending chunk actions to elastic")
-                helpers.bulk(es, actions)
-                actions = []
-        else:
-            try:
+            if category_id is None:
+                l1 = str(row["FamilyCode"]) if row["FamilyCode"] is not None and row["FamilyCode"] != "-" else ""
+                l2 = str(row["SubfamilyCode"]) if row["SubfamilyCode"] is not None and row["SubfamilyCode"] != "-" else ""
+                l3 = str(row["TypeCode"]) if row["TypeCode"] is not None and row["TypeCode"] != "-" else ""
+
+                category_id = l3 or l2 or l1
+
+            category_info = elastic_common.find_category_hierarchy(category_id, categories_map)
+
+            if category_info is None:
+                category_info = elastic_common.find_category_hierarchy(category_id, elsabio_categories_map)
+
+            doc = generate_doc(row, tenant_id, supplier_id, category_info, supplier_meta)
+
+            # An upsert resolves to an update when the id already exists, otherwise an insert
+            operation = "update" if doc["_id"] in existing_ids else "insert"
+            log_debug(f"ref={sku} operation={operation}")
+
+            if is_bulk:
+                actions.append(doc)
+                imported_ids.add(doc["_id"])
+            else:
                 if not bulk:logging.info("Adding: " + json.dumps(doc["doc"], indent=2))
                 es.update(
                     index=doc["_index"],
@@ -220,10 +249,17 @@ def main():
                     }
                 )
                 imported_ids.add(doc["_id"])
-            except Exception as e:
-                logging.error(f"1-by-1 Update failed for product SKU: {sku}. Error: {e}")
-                logging.info("Stopping script after first failure.")
-                sys.exit(1)
+        except Exception as e:
+            log_debug(f"ref={sku} ERROR {e}")
+            logging.error(f"Update failed for product SKU: {sku}. Error: {e}")
+            logging.info("Stopping script after first failure.")
+            sys.exit(1)
+
+        # Bulk upload in chunks of 500 for performance
+        if is_bulk and len(actions) >= 500:
+            logging.info("Bulk upload chunk is 500: sending chunk actions to elastic")
+            helpers.bulk(es, actions)
+            actions = []
 
     if actions and is_bulk:
         logging.info("Sending remaining actions to elastic")
@@ -234,6 +270,9 @@ def main():
     if to_disable:
         logging.info("Disabling " + str(len(to_disable)) + " products")
         
+        for pid in to_disable:
+            log_debug(f"ref={pid} operation=delete")
+
         if is_bulk:
             disable_actions = [
                 {
@@ -253,11 +292,13 @@ def main():
                         body={"doc": {"deleted": True}}
                     )
                 except Exception as e:
+                    log_debug(f"ref={pid} ERROR {e}")
                     logging.error(f"1-by-1 Disable failed for product ID: {pid}. Error: {e}")
                     logging.info("Stopping script after first failure.")
                     sys.exit(1)
 
     logging.info(f"Imported/Updated: {len(imported_ids)}, Disabled: {len(to_disable)}")
+    log_debug(f"FINISH processing excel file: {file_name}")
 
 
 if __name__ == "__main__":
