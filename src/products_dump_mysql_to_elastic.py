@@ -15,6 +15,14 @@ EXTRANET_DB_DATABASE = os.environ.get("EXTRANET_DB_DATABASE")
 
 ELASTIC_SEARCH_URL = os.environ.get("ELASTIC_SEARCH_URL")
 
+# Characteristic names (PIM keys) to exclude from indexing. Names differ per
+# language, so add every language variant that should be dropped. Matching is
+# case-insensitive and trim-insensitive.
+EXCLUDED_CHARACTERISTICS = [
+    "Descripción de producto",   # es
+    "Descrição do produto",      # pt
+]
+
 tenants_map = {
     "elsabio": {
         "name": "El Sabio",
@@ -49,6 +57,7 @@ mysql_config = {
 }
 
 # Elasticsearch connection
+# Rebuild target. The -current alias will be pointed at -v2 once the rebuild is complete.
 index_name = f"productscatalog-{tenant_id}-products-current"
 categories_index_name = f"productscatalog-{tenant_id}-categories"
 es = Elasticsearch([ELASTIC_SEARCH_URL])
@@ -183,6 +192,7 @@ def transform_row(row, categories_map, prices_by_product, pictures_map):
             "short_description": None,
             "main_picture_url": pictures.get("main_picture_url"),
             "main_picture_thumb_url": pictures.get("main_picture_thumb_url"),
+            "characteristics": pictures.get("characteristics", []),
             "net_price_with_margin": None,
             "grouping_code": row["grouping_code"] if row["grouping_code"] else f"single-{str(row['ref'])}",
             "grouping_value": row["grouping_value"] if row["grouping_value"] else None,
@@ -210,7 +220,10 @@ def dump_to_elasticsearch():
     logging.info("Fetching product prices from MySQL")
     prices_by_product = fetch_product_prices()
 
-    products_client = ProductsServiceClient(company_id=tenant_id)
+    products_client = ProductsServiceClient(
+        company_id=tenant_id,
+        excluded_characteristics=EXCLUDED_CHARACTERISTICS,
+    )
     pictures_map = products_client.fetch_main_pictures(row["ref"] for row in rows)
 
     logging.info("Fetching existing product ids from Elasticsearch")

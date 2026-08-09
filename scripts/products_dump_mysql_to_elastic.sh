@@ -24,6 +24,13 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
+echo "$(date '+%Y-%m-%d %H:%M:%S')     Import own categories from mysql for tenant $TENANT"
+
+python3 "${BASE_PATH}/src/categories_own_dump_mysql_to_elastic.py" $TENANT "${TENANT_LOWER}-own"
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') End own categories import from mysql for tenant $TENANT"
+
+
 echo "$(date '+%Y-%m-%d %H:%M:%S')     Import products from mysql for tenant $TENANT"
 
 /usr/local/bin/python3 "${BASE_PATH}/src/products_dump_mysql_to_elastic.py" $TENANT
