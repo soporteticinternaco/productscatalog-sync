@@ -121,7 +121,31 @@ def fetch_product_prices():
     cursor.close()
     connection.close()
     return prices_by_product
-    
+
+
+def fetch_product_replacements():
+    connection = mysql.connector.connect(**mysql_config)
+    cursor = connection.cursor(dictionary=True)
+
+    # `portal` is not filtered on: this DB is already scoped to a single
+    # tenant (extranet_<tenant>), so every row here applies to this index.
+    cursor.execute("""
+        SELECT id_product, old_as400_id FROM app_product_replacements
+    """)
+
+    replacements_by_product = {}
+    for row in cursor:
+        prod_id = row['id_product']
+        if prod_id not in replacements_by_product:
+            replacements_by_product[prod_id] = []
+
+        replacements_by_product[prod_id].append(row['old_as400_id'])
+
+    cursor.close()
+    connection.close()
+    return replacements_by_product
+
+
 def generateId(tenant_id, supplier_id, id):
     return str(tenant_id).lower() + "-" + str(supplier_id) + "-" + str(id)
 
@@ -142,7 +166,7 @@ def fetch_existing_product_ids(es, index_name, tenant_id):
     return set([doc["_id"] for doc in result])
 
 
-def transform_row(row, categories_map, prices_by_product, pictures_map):
+def transform_row(row, categories_map, prices_by_product, pictures_map, replacements_by_product):
 
     l1 = row["l1Id"]
     l2 = row["l2Id"]
@@ -175,6 +199,7 @@ def transform_row(row, categories_map, prices_by_product, pictures_map):
             "container_units": None,
             "container_type": None,
             "rates": prices_by_product.get(row["id"], []),
+            "replaces": replacements_by_product.get(row["id"], []),
             "tenant_id": tenant_id,
             "supplier_id": supplier_id,
             "supplier_name": row["supplier_name"],
@@ -220,6 +245,9 @@ def dump_to_elasticsearch():
     logging.info("Fetching product prices from MySQL")
     prices_by_product = fetch_product_prices()
 
+    logging.info("Fetching product replacements from MySQL")
+    replacements_by_product = fetch_product_replacements()
+
     products_client = ProductsServiceClient(
         company_id=tenant_id,
         excluded_characteristics=EXCLUDED_CHARACTERISTICS,
@@ -233,7 +261,7 @@ def dump_to_elasticsearch():
     logging.info(f"Transforming {len(rows)} products for indexing")
     actions = []
     for row in rows:
-        action = transform_row(row, categories_map, prices_by_product, pictures_map)
+        action = transform_row(row, categories_map, prices_by_product, pictures_map, replacements_by_product)
 
         if action is not None:
             actions.append(action)
