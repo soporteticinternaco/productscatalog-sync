@@ -2,6 +2,7 @@ import mysql.connector
 from elasticsearch import Elasticsearch, helpers
 import argparse
 import os
+import re
 import elastic_common
 import logging
 import json
@@ -75,6 +76,11 @@ def fetch_categories():
 def normalize_lang(lang):
     return lang.lower().strip()
 
+ALL_NINES_PATTERN = re.compile(r"^9+$")
+
+def is_sentinel_id(category_id):
+    return bool(ALL_NINES_PATTERN.fullmatch(category_id))
+
 def build_category_docs(rows):
     docs = {}
 
@@ -84,6 +90,12 @@ def build_category_docs(rows):
         l3 = str(row["l3"])
         lang = normalize_lang(row["lang"])
 
+        # level1 is mandatory; level2/level3 only apply, and only need
+        # checking, once that level is actually reached.
+        l1_disabled = is_sentinel_id(l1)
+        l2_disabled = l1_disabled or is_sentinel_id(l2)
+        l3_disabled = l2_disabled or is_sentinel_id(l3)
+
         # Level 1
         doc_id_1 = generateId(tenant_id, supplier_id, l1)
         if doc_id_1 not in docs:
@@ -91,7 +103,7 @@ def build_category_docs(rows):
                 "tenant_id": tenant_id,
                 "supplier_id": supplier_id,
                 "level1": l1,
-                "disabled": False,
+                "disabled": l1_disabled,
                 "description": {}
             }
         docs[doc_id_1]["description"][lang] = row["l1Description"]
@@ -104,7 +116,7 @@ def build_category_docs(rows):
                 "supplier_id": supplier_id,
                 "level1": l1,
                 "level2": l2,
-                "disabled": False,
+                "disabled": l2_disabled,
                 "description": {}
             }
         docs[doc_id_2]["description"][lang] = row["l2Description"]
@@ -118,7 +130,7 @@ def build_category_docs(rows):
                 "level1": l1,
                 "level2": l2,
                 "level3": l3,
-                "disabled": False,
+                "disabled": l3_disabled,
                 "description": {}
             }
         docs[doc_id_3]["description"][lang] = row["l3Description"]
@@ -131,8 +143,8 @@ def fetch_existing_ids():
         "query": {
             "bool": {
                 "must": [
-                    {"term": { "tenant_id": tenant_id }},
-                    {"term": { "supplier_id": supplier_id }}
+                    {"term": { "tenant_id.keyword": tenant_id }},
+                    {"term": { "supplier_id.keyword": supplier_id }}
                 ]
             }
         }
