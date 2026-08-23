@@ -43,7 +43,7 @@ def connect_mysql():
 
 def fetch_categories():
     query = """
-    SELECT DISTINCT 
+    SELECT DISTINCT
         awbl.id_web_brand AS l1, awbl.description AS l1Description,
         aptl.id_product_type AS l2, aptl.description AS l2Description,
         awcl.id_web_category AS l3, awcl.category_name AS l3Description,
@@ -51,12 +51,16 @@ def fetch_categories():
     FROM app_web_brand_lang awbl join app_web_brand wb ON awbl.id_web_brand = wb.id_web_brand
     JOIN app_product_type_lang aptl join app_product_type pt ON aptl.id_product_type = pt.id_product_type
     JOIN app_web_category_lang awcl join app_web_category wc ON awcl.id_web_category = wc.id_web_category
-    JOIN app_language al 
-      ON awbl.id_language = al.id_language 
-     AND aptl.id_language = al.id_language 
+    JOIN app_language al
+      ON awbl.id_language = al.id_language
+     AND aptl.id_language = al.id_language
      AND awcl.id_language = al.id_language
-    where pt.id_product_type like CONCAT(wb.id_web_brand, '%')
-    and wc.id_web_category like CONCAT(pt.id_product_type , '%')
+    JOIN app_product p
+      ON p.id_web_brand = awbl.id_web_brand
+     AND p.id_product_type = aptl.id_product_type
+     AND p.id_web_category = awcl.id_web_category
+    JOIN app_product_brand pb
+      ON pb.id_product_brand = p.id_product_brand
     ORDER BY lang, l1, l2, l3
     """
 
@@ -171,13 +175,18 @@ def upsert_and_disable(docs, existing_ids):
 def main():
     print("Fetching data from MySQL...")
     rows = fetch_categories()
+    print(f"Fetched {len(rows)} rows from MySQL.")
 
     print("Building category documents...")
     docs = build_category_docs(rows)
+    print(f"Built {len(docs)} unique category documents.")
 
     print("Fetching existing Elasticsearch IDs...")
     existing_ids = fetch_existing_ids()
+    print(f"Fetched {len(existing_ids)} existing IDs from Elasticsearch.")
 
+    print(f"New/updated categories: {len(docs) - len(existing_ids)}")
+    print(f"Disabled categories: {len(existing_ids) - len(docs)}")
     print("Indexing new/updated categories and disabling removed ones...")
     upsert_and_disable(docs, existing_ids)
 
