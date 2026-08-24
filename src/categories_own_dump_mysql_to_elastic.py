@@ -97,7 +97,7 @@ def build_category_docs(rows):
         l3_disabled = l2_disabled or is_sentinel_id(l3)
 
         # Level 1
-        doc_id_1 = generateId(tenant_id, supplier_id, l1)
+        doc_id_1 = generateId(tenant_id, supplier_id, 1, l1)
         if doc_id_1 not in docs:
             docs[doc_id_1] = {
                 "tenant_id": tenant_id,
@@ -109,7 +109,7 @@ def build_category_docs(rows):
         docs[doc_id_1]["description"][lang] = row["l1Description"]
 
         # Level 2
-        doc_id_2 = generateId(tenant_id, supplier_id, l2)
+        doc_id_2 = generateId(tenant_id, supplier_id, 2, f"{l1}-{l2}")
         if doc_id_2 not in docs:
             docs[doc_id_2] = {
                 "tenant_id": tenant_id,
@@ -122,7 +122,7 @@ def build_category_docs(rows):
         docs[doc_id_2]["description"][lang] = row["l2Description"]
 
         # Level 3
-        doc_id_3 = generateId(tenant_id, supplier_id, l3)
+        doc_id_3 = generateId(tenant_id, supplier_id, 3, f"{l1}-{l2}-{l3}")
         if doc_id_3 not in docs:
             docs[doc_id_3] = {
                 "tenant_id": tenant_id,
@@ -151,8 +151,8 @@ def fetch_existing_ids():
     }
     return {doc["_id"] for doc in helpers.scan(elastic, index=ES_INDEX, query=query)}
 
-def generateId(tenant_id, supplier_id, id):
-    return str(tenant_id + "-" + supplier_id + "-" + id)
+def generateId(tenant_id, supplier_id, level, id):
+    return f"{tenant_id}-{supplier_id}-l{level}-{id}"
 
 def upsert_and_disable(docs, existing_ids):
     new_ids = set(docs.keys())
