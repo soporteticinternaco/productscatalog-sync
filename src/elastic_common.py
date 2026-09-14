@@ -3,7 +3,7 @@ import logger
 import logging
 import json
 
-def fetch_all_categories(es, index_name, tenant_id, supplier_id):    
+def fetch_all_categories(es, index_name, tenant_id, supplier_id):
     tenant_id = tenant_id.lower()
     categories = []
 
@@ -25,6 +25,7 @@ def fetch_all_categories(es, index_name, tenant_id, supplier_id):
             "level1": doc["_source"].get("level1"),
             "level2": doc["_source"].get("level2"),
             "level3": doc["_source"].get("level3"),
+            "disabled": doc["_source"].get("disabled", False),
             "description": doc["_source"].get("description", {})
         })
 
@@ -40,37 +41,52 @@ def generate_categories_map(categories):
         level3_value = cat["level3"]
 
         if level3_value:
-            category_lookup[level3_value] = cat
+            key = str(level3_value)
         elif level2_value:
-            category_lookup[level2_value] = cat
+            key = str(level2_value)
         elif level1_value:
-            category_lookup[level1_value] = cat
+            key = str(level1_value)
+        else:
+            continue
+
+        existing = category_lookup.get(key)
+        # Sentinel/disabled category docs (e.g. 999999-1901-999999) can share
+        # a key with real ones (e.g. 19-1901): never let a disabled doc
+        # shadow an enabled one.
+        if existing is not None and not existing.get("disabled", False) and cat.get("disabled", False):
+            continue
+
+        category_lookup[key] = cat
 
     return category_lookup
 
 
 def get_category_level_name(category_id, categories_map, else_category_map=None):
-    
+
     if category_id is None:
         return None
+
+    category_id = str(category_id)
 
     if category_id not in categories_map and else_category_map is not None:
         category_level = else_category_map.get(category_id)
     else:
         category_level = categories_map.get(category_id)
-    
+
     description = category_level["description"] if category_level is not None else None
-        
+
     return description
 
-    
+
 def find_category_hierarchy(category_id, categories_map, else_category_map=None):
-    
+
     category = None
 
     if category_id is not None:
-        category = categories_map.get(category_id)
-        
+        # Map keys are strings (they come from ES documents); ids coming from
+        # MySQL may be ints, so normalize before looking up.
+        category = categories_map.get(str(category_id))
+
     if category is None:
         logging.error(f"category_id {category_id} not found in categories_map")
         return None  # category not found
