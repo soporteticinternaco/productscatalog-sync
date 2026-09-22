@@ -19,10 +19,10 @@ ELASTIC_SEARCH_URL = os.environ.get("ELASTIC_SEARCH_URL")
 # Characteristic names (PIM keys) to exclude from indexing. Names differ per
 # language, so add every language variant that should be dropped. Matching is
 # case-insensitive and trim-insensitive.
-EXCLUDED_CHARACTERISTICS = [
-    "Descripción de producto",   # es
-    "Descrição do produto",      # pt
-]
+EXCLUDED_CHARACTERISTICS = []
+#    "Descripción de producto",   # es
+#    "Descrição do produto",      # pt
+#]
 
 tenants_map = {
     "elsabio": {
