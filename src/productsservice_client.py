@@ -19,9 +19,9 @@ PRODUCTS_SERVICE_CHUNK_SIZE = int(os.environ.get("PRODUCTS_SERVICE_CHUNK_SIZE", 
 
 REQUEST_TIMEOUT = 60
 
-# Locales requested from the products service. Characteristics are localized, so
-# one pass is made per language; pictures are language-independent and taken from
-# the es_ES pass.
+# Locales requested from the products service. Characteristics and files are
+# localized, so one pass is made per language; pictures are language-independent
+# and taken from the es_ES pass.
 ES_LOCALE = "es_ES"
 PT_LOCALE = "pt_PT"
 
@@ -115,7 +115,9 @@ class ProductsServiceClient:
             result[ref] = {
                 "main_picture_url": main_picture_url,
                 "main_picture_thumb_url": main_picture_thumb_url,
+                "pictures_raw": pictures,
                 "characteristics_raw": item.get("characteristics") or {},
+                "files_raw": item.get("files") or [],
             }
         return result
 
@@ -173,15 +175,61 @@ class ProductsServiceClient:
             characteristics.append({"lang": lang, "name": name, "value": value})
         return characteristics
 
+    @staticmethod
+    def _build_files(raw):
+        """
+        Turn one language's files list ([{name, url}, ...]) into the
+        {"description", "url"} shape stored under files.<lang>. The products
+        service names each file with `name`; that becomes our `description`.
+        Entries missing a name or url are dropped.
+        """
+        raw = raw or []
+        files = []
+        for entry in raw:
+            name = entry.get("name")
+            url = entry.get("url")
+            if name is None or url is None:
+                continue
+            name = str(name).strip()
+            url = str(url).strip()
+            if not name or not url:
+                continue
+            files.append({"description": name, "url": url})
+        return files
+
+    @staticmethod
+    def _build_pictures(raw):
+        """
+        Turn the products service pictures list into the flat {"name", "url",
+        "thumbnail_url"} shape stored under `pictures`. Pictures are
+        language-independent, so this is built once from the es_ES pass.
+        thumbnail_small_url is mapped to thumbnail_url; the source's larger
+        thumbnail_url is not used.
+        """
+        raw = raw or []
+        pictures = []
+        for entry in raw:
+            url = entry.get("url")
+            if url is None:
+                continue
+            pictures.append({
+                "name": entry.get("name"),
+                "url": url,
+                "thumbnail_url": entry.get("thumbnail_small_url"),
+            })
+        return pictures
+
     def fetch_main_pictures(self, product_refs):
         """
         Given an iterable of product refs, return a dict mapping each ref (as str)
-        to {"main_picture_url", "main_picture_thumb_url", "characteristics"}.
+        to {"main_picture_url", "main_picture_thumb_url", "pictures",
+        "characteristics", "files"}.
 
         Two passes are made against the products service, one per locale (es_ES
-        and pt_PT). Characteristic names differ per language, so each language's
-        characteristics are kept as separate entries tagged with `lang`. Pictures
-        are language-independent and taken from the es_ES pass. A failing chunk is
+        and pt_PT). Characteristics and files differ per language, so each
+        language's entries are kept separately (characteristics tagged with
+        `lang`; files grouped under files.es / files.pt). Pictures are
+        language-independent and taken from the es_ES pass. A failing chunk is
         logged and skipped so a single error does not abort the whole import.
         """
         # Deduplicate while preserving order, normalising to str
@@ -199,10 +247,15 @@ class ProductsServiceClient:
             result[ref] = {
                 "main_picture_url": es_entry.get("main_picture_url"),
                 "main_picture_thumb_url": es_entry.get("main_picture_thumb_url"),
+                "pictures": self._build_pictures(es_entry.get("pictures_raw")),
                 "characteristics": (
                     self._build_characteristics(es_entry.get("characteristics_raw"), "es")
                     + self._build_characteristics(pt_entry.get("characteristics_raw"), "pt")
                 ),
+                "files": {
+                    "es": self._build_files(es_entry.get("files_raw")),
+                    "pt": self._build_files(pt_entry.get("files_raw")),
+                },
             }
 
         overall_elapsed = time.monotonic() - overall_start
