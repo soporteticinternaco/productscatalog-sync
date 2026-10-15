@@ -154,12 +154,15 @@ def run_sync():
     if bulk_ops:
         helpers.bulk(es, bulk_ops)
         logging.info(f"[CAT][{file_name}]: synced {len(bulk_ops)} category documents.")
+        elastic_common.write_import_summary(f"categories in file: {len(category_map)}, documents synced: {len(bulk_ops)}, disabled: {len(to_disable)}")
     else:
         logging.info(f"[CAT][{file_name}]: no changes detected")
+        elastic_common.write_import_summary(f"categories in file: {len(category_map)}, no changes detected")
 
 if __name__ == "__main__":
     try:
         run_sync()
     except Exception as e:
         logging.error(f"Fatal error during dump: {str(e)}", exc_info=True)
+        elastic_common.write_import_summary(f"Fatal error: {str(e)}")
         exit(1)

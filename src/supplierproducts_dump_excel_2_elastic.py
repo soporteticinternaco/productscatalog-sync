@@ -252,6 +252,7 @@ def main():
         except Exception as e:
             log_debug(f"ref={sku} ERROR {e}")
             logging.error(f"Update failed for product SKU: {sku}. Error: {e}")
+            elastic_common.write_import_summary(f"Update failed for product SKU {sku}: {e}")
             logging.info("Stopping script after first failure.")
             sys.exit(1)
 
@@ -294,10 +295,12 @@ def main():
                 except Exception as e:
                     log_debug(f"ref={pid} ERROR {e}")
                     logging.error(f"1-by-1 Disable failed for product ID: {pid}. Error: {e}")
+                    elastic_common.write_import_summary(f"Disable failed for product ID {pid}: {e}")
                     logging.info("Stopping script after first failure.")
                     sys.exit(1)
 
     logging.info(f"Imported/Updated: {len(imported_ids)}, Disabled: {len(to_disable)}")
+    elastic_common.write_import_summary(f"imported/updated: {len(imported_ids)}, disabled: {len(to_disable)}")
     log_debug(f"FINISH processing excel file: {file_name}")
 
 
@@ -306,4 +309,5 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         logging.error(f"Fatal error during dump: {str(e)}", exc_info=True)
+        elastic_common.write_import_summary(f"Fatal error: {str(e)}")
         exit(1)

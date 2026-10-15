@@ -2,6 +2,7 @@ from elasticsearch import Elasticsearch, helpers
 import logger
 import logging
 import json
+import os
 
 def fetch_all_categories(es, index_name, tenant_id, supplier_id):
     tenant_id = tenant_id.lower()
@@ -103,3 +104,19 @@ def find_category_hierarchy(category_id, categories_map, else_category_map=None)
 
 def config_logging(log_file="error_log.log"):
     logger.setup_logger(log_file)
+
+
+def write_import_summary(text):
+    """
+    Writes a one-line result summary of the current import to the file given by
+    the IMPORT_SUMMARY_FILE env var (set by the shell wrapper that maintains the
+    daily import log). No-op when the variable is not set.
+    """
+    path = os.environ.get("IMPORT_SUMMARY_FILE")
+    if not path:
+        return
+    try:
+        with open(path, "w") as f:
+            f.write(" ".join(str(text).split()))
+    except OSError as e:
+        logging.warning(f"Could not write import summary to {path}: {e}")
