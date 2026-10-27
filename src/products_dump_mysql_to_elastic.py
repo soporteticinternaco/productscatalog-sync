@@ -191,9 +191,9 @@ def transform_row(row, categories_map, prices_by_product, pictures_map, replacem
             "level1": l1,
             "level2": l2,
             "level3": l3,
-            "level1Name": elastic_common.get_category_level_name(l1, categories_map),
-            "level2Name": elastic_common.get_category_level_name(l2, categories_map),
-            "level3Name": elastic_common.get_category_level_name(l3, categories_map),
+            "level1Name": elastic_common.get_category_level_name(l1, categories_map, path=(l1, None, None)),
+            "level2Name": elastic_common.get_category_level_name(l2, categories_map, path=(l1, l2, None)),
+            "level3Name": elastic_common.get_category_level_name(l3, categories_map, path=(l1, l2, l3)),
         }
         deleted = True
     else:

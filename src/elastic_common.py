@@ -76,17 +76,32 @@ def generate_categories_map(categories):
     return category_lookup
 
 
-def get_category_level_name(category_id, categories_map, else_category_map=None):
+def get_category_level_name(category_id, categories_map, else_category_map=None, path=None):
+    """
+    `path` is the (level1, level2, level3) of the level being named (deeper
+    levels None), e.g. (l1, l2, None) for an l2. A bare id can be shared by
+    levels or parents (l1 "1" vs l2 "1"), so the path is tried first, in
+    categories_map then else_category_map; the bare id is the fallback.
+    """
 
     if category_id is None:
         return None
 
-    category_id = str(category_id)
+    category_level = None
 
-    if category_id not in categories_map and else_category_map is not None:
-        category_level = else_category_map.get(category_id)
-    else:
-        category_level = categories_map.get(category_id)
+    if path is not None:
+        path_key = category_path_key(*path)
+        category_level = categories_map.get(path_key)
+        if category_level is None and else_category_map is not None:
+            category_level = else_category_map.get(path_key)
+
+    if category_level is None:
+        category_id = str(category_id)
+
+        if category_id not in categories_map and else_category_map is not None:
+            category_level = else_category_map.get(category_id)
+        else:
+            category_level = categories_map.get(category_id)
 
     description = category_level["description"] if category_level is not None else None
 
@@ -119,8 +134,12 @@ def find_category_hierarchy(category_id, categories_map, else_category_map=None,
         "level1": category.get("level1"),
         "level2": category.get("level2"),
         "level3": category.get("level3"),
-        "level1Name": get_category_level_name(category.get("level1"), categories_map, else_category_map),
-        "level2Name": get_category_level_name(category.get("level2"), categories_map, else_category_map),
+        "level1Name": get_category_level_name(
+            category.get("level1"), categories_map, else_category_map,
+            path=(category.get("level1"), None, None)),
+        "level2Name": get_category_level_name(
+            category.get("level2"), categories_map, else_category_map,
+            path=(category.get("level1"), category.get("level2"), None)),
         "level3Name": category.get("description") if category.get("level3") else None,
     }
 
