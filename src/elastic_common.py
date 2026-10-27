@@ -33,6 +33,16 @@ def fetch_all_categories(es, index_name, tenant_id, supplier_id):
     return categories
 
 
+def category_path_key(level1, level2, level3):
+    """
+    Key identifying a category by its full path. Ids of a lower level are not
+    unique across parents (e.g. l3 1017659 exists under both 1/1 and 1/2), so
+    the bare id of the deepest level is ambiguous; the path is not. Contains
+    "|", so it can never collide with a bare-id key in the same map.
+    """
+    return "|".join("" if v is None else str(v) for v in (level1, level2, level3))
+
+
 def generate_categories_map(categories):
     category_lookup = {}
 
@@ -50,14 +60,18 @@ def generate_categories_map(categories):
         else:
             continue
 
-        existing = category_lookup.get(key)
-        # Sentinel/disabled category docs (e.g. 999999-1901-999999) can share
-        # a key with real ones (e.g. 19-1901): never let a disabled doc
-        # shadow an enabled one.
-        if existing is not None and not existing.get("disabled", False) and cat.get("disabled", False):
-            continue
+        # The bare-id key is kept for lookups that only know the deepest id;
+        # when that id is shared by categories under different parents, the
+        # last one wins, so lookups that know the parents use the path key.
+        for k in (key, category_path_key(level1_value, level2_value, level3_value)):
+            existing = category_lookup.get(k)
+            # Sentinel/disabled category docs (e.g. 999999-1901-999999) can share
+            # a key with real ones (e.g. 19-1901): never let a disabled doc
+            # shadow an enabled one.
+            if existing is not None and not existing.get("disabled", False) and cat.get("disabled", False):
+                continue
 
-        category_lookup[key] = cat
+            category_lookup[k] = cat
 
     return category_lookup
 
@@ -79,11 +93,20 @@ def get_category_level_name(category_id, categories_map, else_category_map=None)
     return description
 
 
-def find_category_hierarchy(category_id, categories_map, else_category_map=None):
+def find_category_hierarchy(category_id, categories_map, else_category_map=None, path=None):
+    """
+    `path` is the product's own (level1, level2, level3), None for a level it
+    does not have. When given, the category is looked up by its full path
+    first, so an id shared by several parents resolves to the product's own;
+    otherwise, or if the path is not found, by the bare category_id.
+    """
 
     category = None
 
-    if category_id is not None:
+    if path is not None:
+        category = categories_map.get(category_path_key(*path))
+
+    if category is None and category_id is not None:
         # Map keys are strings (they come from ES documents); ids coming from
         # MySQL may be ints, so normalize before looking up.
         category = categories_map.get(str(category_id))
@@ -98,7 +121,7 @@ def find_category_hierarchy(category_id, categories_map, else_category_map=None)
         "level3": category.get("level3"),
         "level1Name": get_category_level_name(category.get("level1"), categories_map, else_category_map),
         "level2Name": get_category_level_name(category.get("level2"), categories_map, else_category_map),
-        "level3Name": get_category_level_name(category.get("level3"), categories_map, else_category_map),
+        "level3Name": category.get("description") if category.get("level3") else None,
     }
 
 

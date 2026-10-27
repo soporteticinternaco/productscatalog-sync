@@ -65,7 +65,9 @@ def transform_row(row, categories_map, elsabio_categories_map):
     
     category_id =  l3 if l3 is not None else l2 if l2 is not None else l1
     
-    category = elastic_common.find_category_hierarchy(category_id, categories_map, elsabio_categories_map)
+    category = elastic_common.find_category_hierarchy(
+        category_id, categories_map, elsabio_categories_map, path=(l1, l2, l3)
+    )
     
     #if category is None:
     #    category = elastic_common.find_category_hierarchy(category_id, elsabio_categories_map)

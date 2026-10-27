@@ -204,7 +204,7 @@ def transform_row(row, categories_map, prices_by_product, pictures_map, replacem
                           f"(l1Id={row['l1Id']}, l2Id={row['l2Id']}, l3Id={row['l3Id']})")
             return None
 
-        category = elastic_common.find_category_hierarchy(category_id, categories_map)
+        category = elastic_common.find_category_hierarchy(category_id, categories_map, path=(l1, l2, l3))
 
         if category is None:
             logging.error(f"Product '{row['ref']}' cannot be added because could not find category '{category_id}' "
