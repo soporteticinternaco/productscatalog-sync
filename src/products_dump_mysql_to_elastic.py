@@ -93,7 +93,8 @@ def fetch_products():
 	p.oferta as offer,
 	p.destacado as highlight,
 	p.tipo_producto_maq_fer as segment,
-	p.codigo_promocion as promotion_code
+	p.codigo_promocion as promotion_code,
+	p.provider_reference as supplier_ref
         FROM app_product p
         inner join app_product_lang pl1 on p.id_product = pl1.id_product
         inner join app_language l1 on l1.id_language = pl1.id_language and l1.iso_639_1 ='ES'
@@ -259,6 +260,7 @@ def transform_row(row, categories_map, prices_by_product, pictures_map, replacem
             "highlight": row["highlight"],
             "segment": row["segment"],
             "promotion_code": row["promotion_code"],
+            "supplier_ref": row["supplier_ref"],
             "type": "own",
             **category
         }
