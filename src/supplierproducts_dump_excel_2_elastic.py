@@ -69,8 +69,7 @@ def load_excel_data(filepath):
         "SubfamilyCode": str,
         "TypeCode": str
     })
-    df = df.where(pd.notnull(df), None)
-    return df
+    return df.astype(object).where(pd.notnull(df), None)
 
 
 def fetch_supplier_metadata_from_db(supplier_id):
